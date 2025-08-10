@@ -52,10 +52,7 @@ const Landing = () => {
           </div>
           <div className="flex items-center gap-3">
             <Button asChild variant="academic" size="sm">
-              <Link to="/student-login">Student Login</Link>
-            </Button>
-            <Button asChild variant="outline" size="sm" className="text-white border-white/30 hover:bg-white/10">
-              <Link to="/admin-login">Admin Login</Link>
+              <Link to="/auth">Portal Login</Link>
             </Button>
           </div>
         </div>
@@ -83,10 +80,7 @@ const Landing = () => {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button asChild variant="hero" size="lg" className="text-lg px-8 py-4">
-              <Link to="/student-login">Get Started as Student</Link>
-            </Button>
-            <Button asChild variant="academic" size="lg" className="text-lg px-8 py-4 bg-white/10 text-white border-white/30 hover:bg-white/20">
-              <Link to="/admin-login">Administrator Access</Link>
+              <Link to="/auth">Get Started</Link>
             </Button>
           </div>
         </div>
@@ -132,7 +126,7 @@ const Landing = () => {
             Join thousands of Foundation Polytechnic students already using our platform to achieve academic excellence.
           </p>
           <Button asChild variant="academic" size="lg" className="bg-white text-primary hover:bg-white/90">
-            <Link to="/student-login">Start Your Journey</Link>
+            <Link to="/auth">Start Your Journey</Link>
           </Button>
         </div>
       </section>

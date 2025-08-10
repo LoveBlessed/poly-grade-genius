@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -16,51 +16,80 @@ import {
   GraduationCap
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 
 const StudentDashboard = () => {
-  // Mock data for demonstration
-  const studentInfo = {
-    name: "John Doe",
-    studentId: "FP/2024/001",
-    department: "Computer Science",
-    level: "ND II",
-    currentSemester: "First Semester",
-    session: "2024/2025"
-  };
+  const { user, signOut, loading } = useAuth();
+  const [profile, setProfile] = useState<any>(null);
+  const [semesters, setSemesters] = useState<any[]>([]);
+  const [cgpaData, setCgpaData] = useState({
+    currentGPA: 0,
+    overallCGPA: 0,
+    totalCreditUnits: 0,
+    completedSemesters: 0
+  });
 
-  const cgpaData = {
-    currentGPA: 4.2,
-    overallCGPA: 3.8,
-    totalCreditUnits: 45,
-    completedSemesters: 3
-  };
-
-  const semesterHistory = [
-    { 
-      session: "2023/2024", 
-      semester: "Second Semester", 
-      gpa: 4.2, 
-      creditUnits: 15, 
-      status: "Excellent",
-      courses: 6
-    },
-    { 
-      session: "2023/2024", 
-      semester: "First Semester", 
-      gpa: 3.9, 
-      creditUnits: 15, 
-      status: "Good",
-      courses: 6
-    },
-    { 
-      session: "2022/2023", 
-      semester: "Second Semester", 
-      gpa: 3.3, 
-      creditUnits: 15, 
-      status: "Good",
-      courses: 6
+  useEffect(() => {
+    if (user) {
+      loadStudentData();
     }
-  ];
+  }, [user]);
+
+  const loadStudentData = async () => {
+    try {
+      // Load student profile
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select(`
+          *,
+          departments (name)
+        `)
+        .eq('user_id', user?.id)
+        .single();
+      
+      setProfile(profileData);
+
+      // Load semesters data
+      const { data: semestersData } = await supabase
+        .from('semesters')
+        .select(`
+          *,
+          academic_sessions (session_name)
+        `)
+        .eq('student_id', user?.id)
+        .order('created_at', { ascending: false });
+
+      setSemesters(semestersData || []);
+
+      // Calculate CGPA data
+      if (semestersData && semestersData.length > 0) {
+        const completedSemesters = semestersData.filter(s => s.is_completed);
+        const totalCreditUnits = completedSemesters.reduce((sum, s) => sum + (s.total_credit_units || 0), 0);
+        const totalQualityPoints = completedSemesters.reduce((sum, s) => sum + (s.total_quality_points || 0), 0);
+        const overallCGPA = totalCreditUnits > 0 ? totalQualityPoints / totalCreditUnits : 0;
+        const currentGPA = semestersData[0]?.gpa || 0;
+
+        setCgpaData({
+          currentGPA,
+          overallCGPA,
+          totalCreditUnits,
+          completedSemesters: completedSemesters.length
+        });
+      }
+    } catch (error) {
+      console.error('Error loading student data:', error);
+    }
+  };
+
+  if (loading || !profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
 
   const getGPAStatus = (gpa: number) => {
     if (gpa >= 4.0) return { label: "Excellent", variant: "default" as const, className: "gpa-excellent" };
@@ -86,10 +115,15 @@ const StudentDashboard = () => {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right text-white">
-              <p className="font-semibold">{studentInfo.name}</p>
-              <p className="text-sm text-white/80">{studentInfo.studentId}</p>
+              <p className="font-semibold">{profile.first_name} {profile.last_name}</p>
+              <p className="text-sm text-white/80">{profile.student_id}</p>
             </div>
-            <Button variant="outline" size="sm" className="text-white border-white/30 hover:bg-white/10">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="text-white border-white/30 hover:bg-white/10"
+              onClick={signOut}
+            >
               <LogOut className="h-4 w-4 mr-2" />
               Logout
             </Button>
@@ -108,7 +142,7 @@ const StudentDashboard = () => {
                   <User className="h-6 w-6 text-primary" />
                 </div>
                 <div>
-                  <CardTitle className="text-xl">Welcome back, {studentInfo.name.split(' ')[0]}!</CardTitle>
+                  <CardTitle className="text-xl">Welcome back, {profile.first_name}!</CardTitle>
                   <CardDescription>Here's your academic overview</CardDescription>
                 </div>
               </div>
@@ -117,19 +151,19 @@ const StudentDashboard = () => {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-muted-foreground">Student ID</p>
-                  <p className="font-medium">{studentInfo.studentId}</p>
+                  <p className="font-medium">{profile.student_id}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Department</p>
-                  <p className="font-medium">{studentInfo.department}</p>
+                  <p className="font-medium">{profile.departments?.name}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Level</p>
-                  <p className="font-medium">{studentInfo.level}</p>
+                  <p className="font-medium">{profile.level}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Session</p>
-                  <p className="font-medium">{studentInfo.session}</p>
+                  <p className="text-muted-foreground">Status</p>
+                  <p className="font-medium">Active</p>
                 </div>
               </div>
             </CardContent>
@@ -233,31 +267,45 @@ const StudentDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {semesterHistory.map((semester, index) => (
-                <div 
-                  key={index} 
-                  className="flex items-center justify-between p-4 rounded-lg border border-border/50 hover:bg-muted/30 transition-colors"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="font-semibold">{semester.session}</h3>
-                      <Badge variant="outline" className="text-xs">{semester.semester}</Badge>
+              {semesters.length > 0 ? (
+                semesters.map((semester, index) => (
+                  <div 
+                    key={semester.id} 
+                    className="flex items-center justify-between p-4 rounded-lg border border-border/50 hover:bg-muted/30 transition-colors"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className="font-semibold">{semester.academic_sessions?.session_name}</h3>
+                        <Badge variant="outline" className="text-xs">{semester.semester}</Badge>
+                        {semester.is_completed && (
+                          <Badge variant="default" className="text-xs">Completed</Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                        <span>{semester.level}</span>
+                        <span>{semester.total_credit_units || 0} credit units</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-6 text-sm text-muted-foreground">
-                      <span>{semester.courses} courses</span>
-                      <span>{semester.creditUnits} credit units</span>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <div className="text-2xl font-bold text-primary">
+                          {semester.gpa ? semester.gpa.toFixed(2) : '--'}
+                        </div>
+                        {semester.gpa && (
+                          <Badge variant={getGPAStatus(semester.gpa).variant} className="text-xs">
+                            {getGPAStatus(semester.gpa).label}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-primary">{semester.gpa.toFixed(1)}</div>
-                      <Badge variant={getGPAStatus(semester.gpa).variant} className="text-xs">
-                        {semester.status}
-                      </Badge>
-                    </div>
-                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>No semester records yet.</p>
+                  <p className="text-sm">Add your first semester results to get started.</p>
                 </div>
-              ))}
+              )}
             </div>
           </CardContent>
         </Card>
