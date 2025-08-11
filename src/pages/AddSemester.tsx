@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { 
   Plus, 
   Trash2, 
@@ -14,7 +18,6 @@ import {
   BookOpen,
   GraduationCap
 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
 
 interface Course {
   id: string;
@@ -24,8 +27,21 @@ interface Course {
   grade: string;
 }
 
+interface GradingScale {
+  grade: string;
+  points: number;
+}
+
 const AddSemester = () => {
+  const { user } = useAuth();
+  const { toast } = useToast();
   const navigate = useNavigate();
+  
+  const [loading, setLoading] = useState(false);
+  const [academicSessions, setAcademicSessions] = useState<any[]>([]);
+  const [gradingScale, setGradingScale] = useState<GradingScale[]>([]);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  
   const [semester, setSemester] = useState({
     session: "",
     semesterType: "",
@@ -41,13 +57,31 @@ const AddSemester = () => {
     gpa: 0
   });
 
-  const gradePoints = {
-    "A": 5,
-    "B": 4,
-    "C": 3,
-    "D": 2,
-    "E": 1,
-    "F": 0
+  useEffect(() => {
+    loadData();
+  }, [user]);
+
+  const loadData = async () => {
+    if (!user) return;
+    
+    try {
+      const [sessionsResult, gradingResult, profileResult] = await Promise.all([
+        supabase.from('academic_sessions').select('*').order('start_date', { ascending: false }),
+        supabase.from('grading_scale').select('*').order('points', { ascending: false }),
+        supabase.from('profiles').select('*, departments(*)').eq('user_id', user.id).single()
+      ]);
+
+      setAcademicSessions(sessionsResult.data || []);
+      setGradingScale(gradingResult.data || []);
+      setUserProfile(profileResult.data);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load required data.",
+        variant: "destructive",
+      });
+    }
   };
 
   const addCourse = () => {
@@ -77,7 +111,8 @@ const AddSemester = () => {
 
     courses.forEach(course => {
       if (course.grade && course.creditUnit > 0) {
-        const points = gradePoints[course.grade as keyof typeof gradePoints];
+        const gradeData = gradingScale.find(g => g.grade === course.grade);
+        const points = gradeData?.points || 0;
         totalCreditUnits += course.creditUnit;
         totalQualityPoints += points * course.creditUnit;
       }
@@ -92,25 +127,79 @@ const AddSemester = () => {
     });
   };
 
-  const handleSave = () => {
-    if (!semester.session || !semester.semesterType) {
-      alert("Please fill in session and semester details");
+  const handleSave = async () => {
+    if (!user || !semester.session || !semester.semesterType) {
+      toast({
+        title: "Error",
+        description: "Please fill in session and semester details.",
+        variant: "destructive",
+      });
       return;
     }
 
-    const incompleteCourses = courses.filter(course => 
-      !course.code || !course.title || course.creditUnit <= 0 || !course.grade
+    const validCourses = courses.filter(course => 
+      course.code && course.title && course.creditUnit > 0 && course.grade
     );
 
-    if (incompleteCourses.length > 0) {
-      alert("Please complete all course details");
+    if (validCourses.length === 0) {
+      toast({
+        title: "Error",
+        description: "Please add at least one valid course.",
+        variant: "destructive",
+      });
       return;
     }
 
-    calculateGPA();
-    // Here you would save to backend
-    alert("Semester results saved successfully!");
-    navigate("/student-dashboard");
+    setLoading(true);
+
+    try {
+      // Calculate semester totals
+      const totalCreditUnits = validCourses.reduce((sum, course) => sum + course.creditUnit, 0);
+      const totalQualityPoints = validCourses.reduce((sum, course) => {
+        const gradeData = gradingScale.find(g => g.grade === course.grade);
+        const points = gradeData?.points || 0;
+        return sum + (points * course.creditUnit);
+      }, 0);
+      const gpa = totalCreditUnits > 0 ? totalQualityPoints / totalCreditUnits : 0;
+
+      // Create semester record
+      const { data: semesterData, error: semesterError } = await supabase
+        .from('semesters')
+        .insert({
+          student_id: user.id,
+          session_id: semester.session,
+          semester: semester.semesterType as "First Semester" | "Second Semester",
+          level: (userProfile?.level || 'ND I') as "ND I" | "ND II" | "HND I" | "HND II",
+          gpa,
+          total_credit_units: totalCreditUnits,
+          total_quality_points: totalQualityPoints,
+          is_completed: true
+        })
+        .select()
+        .single();
+
+      if (semesterError) throw semesterError;
+
+      // For now, we'll skip creating course records since we need course_id
+      // This will be implemented when we add the admin course management
+      
+      toast({
+        title: "Success",
+        description: "Semester results saved successfully!",
+      });
+
+      navigate('/dashboard');
+
+    } catch (error) {
+      console.error('Error saving semester:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save semester results.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getGPAStatus = (gpa: number) => {
@@ -132,11 +221,9 @@ const AddSemester = () => {
               <p className="text-white/80 text-sm">Enter your course grades and calculate GPA</p>
             </div>
           </div>
-          <Button asChild variant="outline" size="sm" className="text-white border-white/30 hover:bg-white/10">
-            <Link to="/student-dashboard">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Link>
+          <Button variant="outline" size="sm" className="text-white border-white/30 hover:bg-white/10" onClick={() => navigate('/dashboard')}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
           </Button>
         </div>
       </header>
@@ -157,9 +244,11 @@ const AddSemester = () => {
                     <SelectValue placeholder="Select academic session" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="2024/2025">2024/2025</SelectItem>
-                    <SelectItem value="2023/2024">2023/2024</SelectItem>
-                    <SelectItem value="2022/2023">2022/2023</SelectItem>
+                    {academicSessions.map((session) => (
+                      <SelectItem key={session.id} value={session.id}>
+                        {session.session_name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -240,13 +329,12 @@ const AddSemester = () => {
                       <SelectTrigger className="mt-1">
                         <SelectValue placeholder="Grade" />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="A">A (5.0)</SelectItem>
-                        <SelectItem value="B">B (4.0)</SelectItem>
-                        <SelectItem value="C">C (3.0)</SelectItem>
-                        <SelectItem value="D">D (2.0)</SelectItem>
-                        <SelectItem value="E">E (1.0)</SelectItem>
-                        <SelectItem value="F">F (0.0)</SelectItem>
+                        <SelectContent>
+                        {gradingScale.map((grade) => (
+                          <SelectItem key={grade.grade} value={grade.grade}>
+                            {grade.grade} ({grade.points.toFixed(1)})
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -268,7 +356,7 @@ const AddSemester = () => {
                     <div className="text-xs text-muted-foreground text-center w-full">
                       {course.grade && course.creditUnit > 0 && (
                         <div className="font-medium">
-                          QP: {gradePoints[course.grade as keyof typeof gradePoints] * course.creditUnit}
+                          QP: {(gradingScale.find(g => g.grade === course.grade)?.points || 0) * course.creditUnit}
                         </div>
                       )}
                     </div>
@@ -325,10 +413,10 @@ const AddSemester = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {Object.entries(gradePoints).map(([grade, points]) => (
-                  <div key={grade} className="flex justify-between items-center py-1">
-                    <span className="font-medium">{grade}</span>
-                    <span className="text-muted-foreground">{points.toFixed(1)} points</span>
+                {gradingScale.map((grade) => (
+                  <div key={grade.grade} className="flex justify-between items-center py-1">
+                    <span className="font-medium">{grade.grade}</span>
+                    <span className="text-muted-foreground">{grade.points.toFixed(1)} points</span>
                   </div>
                 ))}
               </div>
@@ -338,9 +426,9 @@ const AddSemester = () => {
 
         {/* Save Button */}
         <div className="flex justify-center">
-          <Button onClick={handleSave} variant="hero" size="lg" className="px-12">
+          <Button onClick={handleSave} variant="hero" size="lg" className="px-12" disabled={loading}>
             <Save className="h-5 w-5 mr-2" />
-            Save Semester Results
+            {loading ? "Saving..." : "Save Semester Results"}
           </Button>
         </div>
       </div>

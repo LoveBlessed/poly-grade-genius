@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,13 +18,13 @@ const Auth = () => {
   const [departments, setDepartments] = useState<any[]>([]);
 
   // Load departments when component mounts
-  useState(() => {
+  useEffect(() => {
     const loadDepartments = async () => {
       const { data } = await supabase.from('departments').select('*');
       setDepartments(data || []);
     };
     loadDepartments();
-  });
+  }, []);
 
   // Redirect if already authenticated
   if (user && !loading) {
